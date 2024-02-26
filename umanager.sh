@@ -32,9 +32,15 @@ LICENSE
 EXIT=0
 EXITEDITUSERMENU=0
 EXITEDITGROUPMENU=0
+EXITEDITUSERINFORMATIONMENU=0
 SELECTEDUSER=""
 SELECTEDGROUP=""
 VERSION="1.0"
+SHAREDREADONLYDIRECTORY="/home/sharedFtpReadOnly"
+SHAREDREADWRITEDIRECTORY="/home/sharedFtpReadWrite"
+SHAREDREADONLYGROUP="sharedFtpReadOnly"
+SHAREDREADWRITEGROUP="sharedFtpReadWrite"
+CHROOTLISTPATH="/etc/vsftpd/chroot_list"
 #variables used to signalize if group/user exist
 #if USEREXISTS equals 1, selected user exists, 0 if it does not
 USEREXISTS=0
@@ -68,10 +74,12 @@ function selectGroup(){
   read -p "Enter user name you wish to select: " SELECTEDGROUP
   checkIfGroupExists
   if [ $GROUPEXISTS -eq 1 ]; then
-    echo "Group selected succesfully"
+    clear
+    echo "Group $SELECTEDGROUP selected succesfully"
   else
+    clear
+    echo "Group $SELECTEDGROUP does not exist"
     SELECTEDGROUP=""
-    echo "Group does not exist"
   fi
 
 }
@@ -83,10 +91,12 @@ function selectUser(){
   read -p "Enter user name you wish to select: " SELECTEDUSER
   checkIfUserExists
   if [ $USEREXISTS -eq 1 ]; then
-    echo "User selected succesfully"
+    clear
+    echo "User $SELECTEDUSER selected succesfully"
   else
+    clear
+    echo "User $SELECTEDUSER does not exist"
     SELECTEDUSER=""
-    echo "User does not exist"
   fi
 }
 
@@ -116,6 +126,7 @@ function addUser(){
     return 0
   fi
   adduser $NEWUSERNAME
+  mkhomedir_helper $NEWUSERNAME
   echo "User $NEWUSERNAME created"
 }
 
@@ -146,7 +157,7 @@ function removeUser(){
     return 0
   fi
   CHOICE='n'
-  read -p "Do you really want to delete: $SELECTEDUSER ? y\n" CHOICE
+  read -p "Do you really want to delete: $SELECTEDUSER ? [N\y] " CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -164,7 +175,7 @@ function removeGroup(){
     return 0
   fi
   CHOICE='n'
-  read -p "Do you really want to delete: $SELECTEDGROUP ? y\n" CHOICE
+  read -p "Do you really want to delete: $SELECTEDGROUP ? [N\y] " CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -187,7 +198,7 @@ function changeUserHomeDir(){
   clear
   eval echo "current $SELECTEDUSER home directory: ~test"
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDUSER home directory?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDUSER home directory?: [N\y] " CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -205,7 +216,7 @@ function changeUserExpireDate(){
   clear
   chage -l $SELECTEDUSER | head -n 4 | tail -n 1
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDUSER expire date?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDUSER expire date?: [N\y]" CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -238,7 +249,7 @@ function changeUserPasswordExpire(){
   clear
   chage -l $SELECTEDUSER | head -n 2 | tail -n 1
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDUSER password expire date?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDUSER password expire date?: [N\y]" CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -256,7 +267,7 @@ function changeUserLogin(){
   clear
   echo "Current user login $SELECTEDUSER"
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDUSER login?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDUSER login?: [N\y]" CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -270,7 +281,7 @@ function changeUserLogin(){
 function changeUserPassword(){
   clear
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDUSER password?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDUSER password?: [N\y]" CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -324,7 +335,7 @@ function changeUserShell(){
   clear
   echo "current $SELECTEDUSER shell: $(grep "^$SELECTEDUSER:" /etc/passwd | awk -F: '{print $NF}')"
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDUSER shell?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDUSER shell?: [N\y]" CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -337,6 +348,149 @@ function changeUserShell(){
     return 0
   fi 
   usermod -s "$CHOSENSHELL" $SELECTEDUSER
+}
+
+#funciton that jails/frees users
+#             IMPORTANT
+#it does not work without restarting the service
+function jailFTP(){
+  ISJAILED=""
+  if grep -q "^$SELECTEDUSER$" /etc/vsftpd/chroot_list; then
+    ISJAILED=1
+  else
+    ISJAILED=0
+  fi
+  CHOICE=""
+  if [ $ISJAILED -eq 1 ];then
+    read -p "Do you want to free $SELECTEDUSER?: [N\y] " CHOICE
+    if [ "$CHOICE" != "y" ] && [ "$CHOICE" != "Y" ];then
+      return 0
+    fi
+    sed -i "/^$SELECTEDUSER$/d" "/etc/vsftpd/chroot_list"
+  else
+    read -p "Do you want to jail $SELECTEDUSER [N\y] " CHOICE
+    if [ "$CHOICE" != "y" ] && [ "$CHOICE" != "Y" ];then
+      return 0
+    fi
+    echo "$SELECTEDUSER" >> "/etc/vsftpd/chroot_list"
+  fi
+}
+
+#converts user shell to /bin/false so user cannot log in on with physical access but he can still
+#log in through ftp
+function makeUserFTPOnly(){
+  clear
+  CHOICE='n'
+  read -p "Do you want to make $SELECTEDUSER ftp only user? [N\y] " CHOICE
+  if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
+    return 0
+  fi
+  usermod -s "/bin/false" "$SELECTEDUSER"
+  echo "From now on $SELECTEDUSER can only log in through FTP"
+}
+
+function makeUserNotFTPOnly(){
+  clear
+  CHOICE='n'
+  read -p "Do you want to make $SELECTEDUSER a normal user? [N\y] " CHOICE
+  if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
+    return 0
+  fi
+  usermod -s "/bin/bash" "$SELECTEDUSER"
+  echo "From now on $SELECTEDUSER can log in normally"
+}
+
+#defines user home directory as a shared directory where users only have read permission
+function makeUserReadOnlySharedDir(){
+  CHOICE='n'
+  read -p "Do you want to make $SELECTEDUSER a read only user with access read-only access to shared directory? [N\y] " CHOICE
+  if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
+    return 0
+  fi
+  if ! grep -q "^$SELECTEDUSER$" /etc/vsftpd/chroot_list; then
+    echo "$SELECTEDUSER" >> "/etc/vsftpd/chroot_list"
+  fi
+  usermod -g "$SHAREDREADONLYGROUP" "$SELECTEDUSER"
+  usermod -d "$SHAREDREADONLYDIRECTORY" "$SELECTEDUSER"
+}
+
+#defines user home driectory as a shared directory where this user can read and write files
+function makeUserReadWriteSharedDir(){
+  CHOICE='n'
+  read -p "Do you want to make $SELECTEDUSER a read only user with access read-write access to shared directory? [N\y] " CHOICE
+  if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
+    return 0
+  fi
+  if ! grep -q "^$SELECTEDUSER$" /etc/vsftpd/chroot_list; then
+    echo "$SELECTEDUSER" >> "/etc/vsftpd/chroot_list"
+  fi
+  usermod -g "$SHAREDREADWRITEGROUP" "$SELECTEDUSER"
+  usermod -d "$SHAREDREADWRITEDIRECTORY" "$SELECTEDUSER"
+}
+
+#removes the effect of the two functions above
+#removes user from both $SHAREDREADONLYGROUP and $SHAREDREADWRITEGROUP
+function removeUserFromSharedDirectories(){
+  CHOICE='n'
+  read -p "Do you want to give back $SELECTEDUSER his home directory and make him a normal user? [N\y] " CHOICE
+  if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
+    return 0
+  fi
+  if grep -q "^$SELECTEDUSER$" /etc/vsftpd/chroot_list; then
+    sed -i "/^$SELECTEDUSER$/d" "/etc/vsftpd/chroot_list"
+  fi
+  usermod -g "$SELECTEDUSER" "$SELECTEDUSER"
+  chown -R "$SELECTEDUSER:$SELECTEDUSER" "/home/$SELECTEDUSER"
+  usermod -d "/home/$SELECTEDUSER" "$SELECTEDUSER"
+}
+
+function editUserPhone(){
+  clear
+  VALIDPHONE=0
+  read -p "Enter new $SELECTEDUSER phone number: " NEWPHONENUMBER
+  chfn -h "$NEWPHONENUMBER" "$SELECTEDUSER"
+}
+function editUserWorkPhone(){
+  clear
+  read -p "Enter new $SELECTEDUSER work phone number: " NEWPHONENUMBER
+  chfn -p "$NEWPHONENUMBER" "$SELECTEDUSER"
+}
+function editUserFullname(){
+  clear
+  read -p "Enter new $SELECTEDUSER fullname: " NEWFULLNAME
+  chfn -f "$NEWFULLNAME" "$SELECTEDUSER"
+}
+function editUserRoom(){
+  clear
+  read -p "Enter new $SELECTEDUSER room number: " NEWROOM
+  chfn -r "$NEWROOM" "$SELECTEDUSER"
+}
+function editUserInformationMenu(){
+  CHOICE=""
+  echo "1. Edit user fullname"
+  echo "2. Edit user phone number"
+  echo "3. Edit user work phone number"
+  echo "4. Edit user room"
+  echo "5. Exit"
+  read -p "Enter 1-5" CHOICE
+  case "$CHOICE" in
+    1) editUserFullname
+    ;;
+    2) editUserPhone
+    ;;
+    3) editUserWorkPhone
+    ;;
+    4) editUserRoom
+    ;;
+    5) EXITEDITUSERINFORMATIONMENU=1
+    ;;
+  esac
+}
+
+function editUserInformation(){
+  while [ $EXITEDITUSERINFORMATIONMENU -eq 0 ] && [ $USEREXISTS -eq 1 ]; do
+    editUserInformationMenu
+  done
 }
 
 #menu for editing user
@@ -359,10 +513,15 @@ function editUserMenu(){
   echo "10. Remove user from group"
   echo "11. List user groups"
   echo "12. Change users shell"
-  echo "13. Edit user disk quota"
-  echo "14. Jail in ftp"
-  echo "15. Exit"
-  read -p "Enter 1-15 to chose option: " CHOICE
+  echo "13. Make user FTP only"
+  echo "14. Make user standard user"
+  echo "15. Make user read-only to shared directory $SHAREDREADONLYDIRECTORY"
+  echo "16. Make user read-write to shared directory $SHAREDREADWRITEDIRECTORY"
+  echo "17. Remove user from shared directories"
+  echo "18. Jail/free chroot"
+  echo "19. Edit user information"
+  echo "20. Exit"
+  read -p "Enter 1-19 to chose option: " CHOICE
   case "$CHOICE" in
     1) editUserComment
     ;;
@@ -388,12 +547,22 @@ function editUserMenu(){
     ;;
     12) changeUserShell
     ;;
-    13) editUserDiskQuota
+    13) makeUserFTPOnly
     ;;
-    14) jailFTP
+    14) makeUserNotFTPOnly
     ;;
-    15)clear 
-      EXITEDITUSERMENU=1
+    15) makeUserReadOnlySharedDir
+    ;;
+    16) makeUserReadWriteSharedDir
+    ;;
+    17) removeUserFromSharedDirectories
+    ;;
+    18) jailFTP
+    ;;
+    19) editUserInformation
+    ;;
+    20) clear 
+        EXITEDITUSERMENU=1
     ;;
     *)
     ;;
@@ -417,10 +586,9 @@ is_gid_unique() {
 
 #changes GID of the group selected
 function changeGID(){
-  clear
   getent group $SELECTEDGROUP | awk -F: '{print "Group GID: " $3}'
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDGROUP GID?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDGROUP GID?: [N\y]" CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -440,7 +608,7 @@ function changeGID(){
 function changeGroupName(){
   clear
   CHOICE='n'
-  read -p "Do you really want to change $SELECTEDGROUP name?: y\n" CHOICE
+  read -p "Do you really want to change $SELECTEDGROUP name?: [N\y]" CHOICE
   if [ "$CHOICE" != "y"  ] && [ "$CHOICE" != "Y" ]; then
     return 0
   fi
@@ -459,6 +627,7 @@ function changeGroupName(){
 
 #menu for editing groups
 function editGroupMenu(){
+  clear
   if [ $GROUPEXISTS -eq 0 ]; then
     echo "Select group you wish to edit first"
     return 0
@@ -484,14 +653,14 @@ function editGroupMenu(){
 
 #loop for editing groups
 function editGroup(){
-  while [ $EXITEDITGROUPMENU -eq 0 ]; do
+  while [ $EXITEDITGROUPMENU -eq 0 ] && [ $GROUPEXISTS -eq 1 ]; do
     editGroupMenu
   done
 }
 
 #loop for editing users
 function editUser(){
-  while [ $EXITEDITUSERMENU -eq 0 ]; do
+  while [ $EXITEDITUSERMENU -eq 0 ] && [ $USEREXISTS -eq 1 ]; do
     editUserMenu
   done
 }
@@ -516,7 +685,7 @@ function menu(){
   echo "8. Edit selected group"
   echo "9. Select user"
   echo "10. Select group"
-  echo "11. exit"
+  echo "11. Exit"
   read -p "Enter 1-11 to choose option " CHOICE
   case "$CHOICE" in
     1) listUsers
@@ -548,6 +717,37 @@ function menu(){
   esac
 
 }
+
+function checkConfiguration(){
+  if ! getent group "$SHAREDREADWRITEGROUP" >/dev/null;then
+    groupadd "$SHAREDREADWRITEGROUP"
+  fi
+  if ! getent group "$SHAREDREADONLYGROUP" >/dev/null;then
+    groupadd "$SHAREDREADONLYGROUP"
+  fi
+  if ! [ -d "$SHAREDREADWRITEDIRECTORY" ];then
+    mkdir "/home/$SHAREDREADWRITEDIRECTORY"
+    chown "root:$SHAREDREADWRITEGROUP" "$SHAREDREADWRITEDIRECTORY"
+    chmod 770 "$SHAREDREADWRITEDIRECTORY"
+  fi
+  if ! [ -d "$SHAREDREADONLYDIRECTORY" ];then
+    mkdir "/home/$SHAREDREADONLYDIRECTORY"
+    chown "root:$SHAREDREADONLYGROUP" "$SHAREDREADONLYDIRECTORY"
+    chmod 750 "$SHAREDREADONLYDIRECTORY"
+  fi
+  if ! dnf list installed "vsftpd" > /dev/null 2>&1;then
+    echo "Vsftpd not installed, script will not work correctly"
+    read -p "Do you want to install it? [N\y] " CHOICE
+    if [ "$CHOICE" = "y"  ] && [ "$CHOICE" = "Y" ];then
+      dnf -y install vsftpd
+    fi
+  fi
+  if dnf list installed "vsftpd" > /dev/null 2>&1;then
+    if ! [ -f "$CHROOTLISTPATH" ];then
+      touch "/etc/vsftpd/chroot_list"
+    fi
+  fi
+}
 #
 #end of functions section
 #handling of flags provided
@@ -570,8 +770,8 @@ if [[ -z "$SUDO_USER" ]]; then
   echo "This script must be run with sudo or as a root to work correctly"
   exit 1
 fi
+checkConfiguration
 #main loop of the script
 while [ $EXIT -eq 0 ]; do
   menu   
 done
-
