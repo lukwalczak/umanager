@@ -1,5 +1,5 @@
 # umanager
-##University project for managing linux users
+University project for managing linux users
 **Simplified management of users and groups:**
 
 - Displaying users and groups
